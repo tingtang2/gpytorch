@@ -31,8 +31,8 @@ class ComputationAwareGP(ExactGP):
 
         super().__init__(
             # Training data is subset to satisfy the requirement: num_non_zero * projection_dim = num_train_targets
-            train_inputs[0 : num_non_zero * projection_dim],
-            train_targets[0 : num_non_zero * projection_dim],
+            train_inputs[0:num_non_zero * projection_dim],
+            train_targets[0:num_non_zero * projection_dim],
             likelihood,
         )
         self.mean_module = mean_module
@@ -54,22 +54,23 @@ class ComputationAwareGP(ExactGP):
                     non_zero_idcs,
                     dtype=train_inputs.dtype,
                     device=train_inputs.device,
-                ).div(math.sqrt(self.num_non_zero))
-            )
+                ).div(math.sqrt(self.num_non_zero)))
         elif initialization == "targets":
             # Initialize with training targets
             self.non_zero_action_entries = torch.nn.Parameter(
-                train_targets.clone()[: self.num_non_zero * projection_dim].reshape(self.projection_dim, -1)
-            )
+                train_targets.clone()[:self.num_non_zero *
+                                      projection_dim].reshape(
+                                          self.projection_dim, -1))
             self.non_zero_action_entries.div(
-                torch.linalg.vector_norm(self.non_zero_action_entries, dim=1).reshape(-1, 1)
-            )
+                torch.linalg.vector_norm(self.non_zero_action_entries,
+                                         dim=1).reshape(-1, 1))
         elif initialization == "eigen":
             # Initialize via top eigenvectors of kernel submatrices
             with torch.no_grad():
-                X = train_inputs.clone()[0 : num_non_zero * projection_dim].reshape(
-                    projection_dim, num_non_zero, train_inputs.shape[-1]
-                )
+                X = train_inputs.clone()[0:num_non_zero *
+                                         projection_dim].reshape(
+                                             projection_dim, num_non_zero,
+                                             train_inputs.shape[-1])
                 K_sub_matrices = self.covar_module(X)
                 _, evecs = torch.linalg.eigh(K_sub_matrices.to_dense())
             self.non_zero_action_entries = torch.nn.Parameter(evecs[:, -1])
@@ -77,12 +78,12 @@ class ComputationAwareGP(ExactGP):
             raise ValueError(f"Unknown initialization: '{initialization}'.")
 
         self.actions_op = (
-            operators.BlockSparseLinearOperator(  # TODO: Can we speed this up by allowing ranges as non-zero indices?
+            operators.
+            BlockSparseLinearOperator(  # TODO: Can we speed this up by allowing ranges as non-zero indices?
                 non_zero_idcs=non_zero_idcs,
                 blocks=self.non_zero_action_entries,
                 size_sparse_dim=self.projection_dim * self.num_non_zero,
-            )
-        )
+            ))
 
     def __call__(self, x: torch.Tensor) -> MultivariateNormal:
         if self.training:
@@ -101,6 +102,13 @@ class ComputationAwareGP(ExactGP):
             # Posterior mode
             if x.ndim == 1:
                 x = torch.atleast_2d(x).mT
+            # check if in batch acquisition mode
+            if x.ndim == 3:
+                covar_test_arg = x.transpose(0, 1)
+                covar_train_arg = self.train_inputs[0].unsqueeze(0)
+            else:
+                covar_test_arg = x
+                covar_train_arg = self.train_inputs[0]
 
             # Kernel forward and hyperparameters
             if isinstance(self.covar_module, kernels.ScaleKernel):
@@ -116,62 +124,55 @@ class ComputationAwareGP(ExactGP):
                 # If the Cholesky factor of the gram matrix S'(K + noise)S hasn't been precomputed
                 # (in the loss function), compute it.
                 K_lazy = kernel_forward_fn(
-                    self.train_inputs[0]
-                    .div(lengthscale)
-                    .view(self.projection_dim, self.num_non_zero, self.train_inputs[0].shape[-1]),
-                    self.train_inputs[0]
-                    .div(lengthscale)
-                    .view(self.projection_dim, 1, self.num_non_zero, self.train_inputs[0].shape[-1]),
+                    self.train_inputs[0].div(lengthscale).view(
+                        self.projection_dim, self.num_non_zero,
+                        self.train_inputs[0].shape[-1]),
+                    self.train_inputs[0].div(lengthscale).view(
+                        self.projection_dim, 1, self.num_non_zero,
+                        self.train_inputs[0].shape[-1]),
                 )
-                gram_SKS = (
-                    (
-                        (K_lazy @ self.actions_op.blocks.view(self.projection_dim, 1, self.num_non_zero, 1)).squeeze(-1)
-                        * self.actions_op.blocks
-                    )
-                    .sum(-1)
-                    .mul(outputscale)
-                )
+                gram_SKS = (((K_lazy @ self.actions_op.blocks.view(
+                    self.projection_dim, 1, self.num_non_zero, 1)).squeeze(-1)
+                             *
+                             self.actions_op.blocks).sum(-1).mul(outputscale))
 
-                StrS_diag = (self.actions_op.blocks**2).sum(-1)  # NOTE: Assumes orthogonal actions.
-                gram_SKhatS = gram_SKS + torch.diag(self.likelihood.noise * StrS_diag)
+                StrS_diag = (self.actions_op.blocks**2).sum(
+                    -1)  # NOTE: Assumes orthogonal actions.
+                gram_SKhatS = gram_SKS + torch.diag(
+                    self.likelihood.noise * StrS_diag)
                 self.cholfac_gram_SKhatS = linop_utils.cholesky.psd_safe_cholesky(
-                    gram_SKhatS.to(dtype=torch.float64), upper=False
-                )
+                    gram_SKhatS.to(dtype=torch.float64), upper=False)
 
             # Cross-covariance mapped to the low-dimensional space spanned by the actions: k(x, X)S
-            covar_x_train_actions = (
-                (
-                    kernel_forward_fn(
-                        x / lengthscale,
-                        (self.train_inputs[0] / lengthscale).view(
-                            self.projection_dim, self.num_non_zero, self.train_inputs[0].shape[-1]
-                        ),
-                    )
-                    @ self.actions_op.blocks.view(self.projection_dim, self.num_non_zero, 1)
-                )
-                .squeeze(-1)
-                .mT.mul(outputscale)
-            )
+            covar_x_train_actions = ((kernel_forward_fn(
+                covar_test_arg / lengthscale,
+                (covar_train_arg / lengthscale).view(
+                    self.projection_dim, self.num_non_zero,
+                    self.train_inputs[0].shape[-1]),
+            ) @ self.actions_op.blocks.view(
+                self.projection_dim, self.num_non_zero,
+                1)).squeeze(-1).mT.mul(outputscale))
 
             # Matrix-square root of the covariance downdate: k(x, X)L^{-1}
             covar_x_train_actions_cholfac_inv = torch.linalg.solve_triangular(
-                self.cholfac_gram_SKhatS, covar_x_train_actions.mT, upper=False
-            ).mT
+                self.cholfac_gram_SKhatS,
+                covar_x_train_actions.mT,
+                upper=False).mT
 
             # "Projected" training data (with mean correction)
-            actions_target = self.actions_op @ (self.train_targets - self.mean_module(self.train_inputs[0]))
+            actions_target = self.actions_op @ (
+                self.train_targets - self.mean_module(self.train_inputs[0]))
 
             # Compressed representer weights
-            compressed_repr_weights = (
-                torch.cholesky_solve(
-                    actions_target.unsqueeze(1).to(dtype=torch.float64), self.cholfac_gram_SKhatS, upper=False
-                )
-                .squeeze(-1)
-                .to(self.train_inputs[0].dtype)
-            )
+            compressed_repr_weights = (torch.cholesky_solve(
+                actions_target.unsqueeze(1).to(dtype=torch.float64),
+                self.cholfac_gram_SKhatS,
+                upper=False).squeeze(-1).to(self.train_inputs[0].dtype))
 
             # (Combined) posterior mean and covariance evaluated at the test point(s)
-            mean = self.mean_module(x) + covar_x_train_actions @ compressed_repr_weights
-            covar = self.covar_module(x) - operators.RootLinearOperator(root=covar_x_train_actions_cholfac_inv)
+            mean = self.mean_module(
+                x) + covar_x_train_actions @ compressed_repr_weights
+            covar = self.covar_module(x) - operators.RootLinearOperator(
+                root=covar_x_train_actions_cholfac_inv)
 
             return MultivariateNormal(mean, covar)
