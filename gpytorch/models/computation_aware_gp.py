@@ -104,12 +104,7 @@ class ComputationAwareGP(ExactGP):
                 x = torch.atleast_2d(x).mT
             # check if in batch acquisition mode
             if x.ndim == 3:
-                covar_test_arg = x.transpose(0, 1)
-                covar_train_arg = self.train_inputs[0].unsqueeze(0)
-            else:
-                covar_test_arg = x
-                covar_train_arg = self.train_inputs[0]
-
+                x = x.reshape(-1, x.size(-1))
             # Kernel forward and hyperparameters
             if isinstance(self.covar_module, kernels.ScaleKernel):
                 outputscale = self.covar_module.outputscale
@@ -145,8 +140,8 @@ class ComputationAwareGP(ExactGP):
 
             # Cross-covariance mapped to the low-dimensional space spanned by the actions: k(x, X)S
             covar_x_train_actions = ((kernel_forward_fn(
-                covar_test_arg / lengthscale,
-                (covar_train_arg / lengthscale).view(
+                x / lengthscale,
+                (self.train_inputs[0] / lengthscale).view(
                     self.projection_dim, self.num_non_zero,
                     self.train_inputs[0].shape[-1]),
             ) @ self.actions_op.blocks.view(
