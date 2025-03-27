@@ -5,13 +5,16 @@ from __future__ import annotations
 from typing import Generator, Optional
 
 import torch
-
 from linear_operator import settings
-from linear_operator.operators import BlockSparseLinearOperator, LinearOperator, to_linear_operator, ZeroLinearOperator
+from linear_operator.operators import (
+    BlockDiagonalSparseLinearOperator,
+    LinearOperator,
+    to_linear_operator,
+    ZeroLinearOperator,
+)
 from torch import Tensor
 
 from .... import kernels
-
 from .linear_solver import LinearSolver, LinearSolverState, LinearSystem
 
 # from .policies import GradientPolicy
@@ -124,18 +127,20 @@ class ProbabilisticLinearSolver(LinearSolver):
 
                 # Normalize action
                 action = (
-                    BlockSparseLinearOperator(
+                    BlockDiagonalSparseLinearOperator(
                         non_zero_idcs=action.non_zero_idcs,
                         blocks=action.blocks / torch.linalg.vector_norm(action.blocks),
-                        size_sparse_dim=action.size_sparse_dim,
+                        size_input_dim=action.size_input_dim,
                     )
-                    if isinstance(action, BlockSparseLinearOperator)
+                    if isinstance(action, BlockDiagonalSparseLinearOperator)
                     else action / torch.linalg.vector_norm(action)
                 )
 
             with torch.no_grad():  # Saves 2x compute since we don't need gradients through the solve.
                 linear_op_action = (
-                    (action._matmul(linear_op)) if isinstance(action, BlockSparseLinearOperator) else linear_op @ action
+                    (action._matmul(linear_op))
+                    if isinstance(action, BlockDiagonalSparseLinearOperator)
+                    else linear_op @ action
                 ).squeeze()
 
                 if solver_state.cache["actions_op"] is not None:
@@ -167,7 +172,8 @@ class ProbabilisticLinearSolver(LinearSolver):
                     break
 
                 # Terminate if actions are not independent
-                if solver_state.iteration > 1:
+                if solver_state.iteration > 1 and not isinstance(action, BlockDiagonalSparseLinearOperator):
+
                     if solver_state.iteration > torch.linalg.matrix_rank(
                         torch.vstack((solver_state.cache["actions_op"], action.reshape(1, -1)))
                     ):
@@ -181,7 +187,7 @@ class ProbabilisticLinearSolver(LinearSolver):
             if solver_state.cache["actions_op"] is None:
                 # Matrix of previous actions
                 solver_state.cache["actions_op"] = (
-                    action if isinstance(action, BlockSparseLinearOperator) else torch.reshape(action, (1, -1))
+                    action if isinstance(action, BlockDiagonalSparseLinearOperator) else torch.reshape(action, (1, -1))
                 )
 
                 with torch.no_grad():
@@ -223,27 +229,18 @@ class ProbabilisticLinearSolver(LinearSolver):
                     )
 
                 # Matrix of actions
-                if isinstance(action, BlockSparseLinearOperator):
-                    solver_state.cache["actions_op"] = BlockSparseLinearOperator(
+                if isinstance(action, BlockDiagonalSparseLinearOperator):
+                    solver_state.cache["actions_op"] = BlockDiagonalSparseLinearOperator(
                         non_zero_idcs=torch.cat(
                             (solver_state.cache["actions_op"].non_zero_idcs, action.non_zero_idcs), dim=0
                         ),
                         blocks=torch.cat((solver_state.cache["actions_op"].blocks, action.blocks), dim=0),
-                        size_sparse_dim=solver_state.problem.A.shape[0],
+                        size_input_dim=solver_state.problem.A.shape[0],
                     )
                 else:
                     solver_state.cache["actions_op"] = torch.vstack(
                         (solver_state.cache["actions_op"], action.reshape(1, -1))
                     )
-
-                # with torch.no_grad():
-                #     # Matrix of actions applied to the kernel matrix
-                #     solver_state.cache["linear_op_actions"] = torch.hstack(
-                #         (
-                #             solver_state.cache["linear_op_actions"],
-                #             linear_op_action.reshape(-1, 1),
-                #         )
-                #     )
 
             with torch.no_grad():
                 # Update compressed solution estimate
@@ -409,10 +406,10 @@ class ProbabilisticLinearSolver(LinearSolver):
                 action = self.policy(solver_state)
 
                 # Normalize action
-                action = BlockSparseLinearOperator(
+                action = BlockDiagonalSparseLinearOperator(
                     non_zero_idcs=action.non_zero_idcs,
                     blocks=action.blocks / torch.linalg.vector_norm(action.blocks),
-                    size_sparse_dim=action.size_sparse_dim,
+                    size_input_dim=action.size_input_dim,
                 )
                 action = action.to(rhs.device)
 
@@ -420,15 +417,17 @@ class ProbabilisticLinearSolver(LinearSolver):
                 # Matrix of actions
                 if solver_state.cache["actions_op"] is None:
                     solver_state.cache["actions_op"] = (
-                        action if isinstance(action, BlockSparseLinearOperator) else torch.reshape(action, (1, -1))
+                        action
+                        if isinstance(action, BlockDiagonalSparseLinearOperator)
+                        else torch.reshape(action, (1, -1))
                     )
                 else:
-                    solver_state.cache["actions_op"] = BlockSparseLinearOperator(
+                    solver_state.cache["actions_op"] = BlockDiagonalSparseLinearOperator(
                         non_zero_idcs=torch.cat(
                             (solver_state.cache["actions_op"].non_zero_idcs, action.non_zero_idcs), dim=0
                         ),
                         blocks=torch.cat((solver_state.cache["actions_op"].blocks, action.blocks), dim=0),
-                        size_sparse_dim=solver_state.problem.A.shape[0],
+                        size_input_dim=solver_state.problem.A.shape[0],
                     )
 
                 # Compute S'Ks
@@ -472,10 +471,10 @@ class ProbabilisticLinearSolver(LinearSolver):
                             )
 
                         # Remove current action from actions_op in cache
-                        solver_state.cache["actions_op"] = BlockSparseLinearOperator(
+                        solver_state.cache["actions_op"] = BlockDiagonalSparseLinearOperator(
                             non_zero_idcs=solver_state.cache["actions_op"].non_zero_idcs[0:-1, :],
                             blocks=solver_state.cache["actions_op"].blocks[0:-1, :],
-                            size_sparse_dim=solver_state.cache["actions_op"].size_sparse_dim,
+                            size_input_dim=solver_state.cache["actions_op"].size_input_dim,
                         )
                         break
 

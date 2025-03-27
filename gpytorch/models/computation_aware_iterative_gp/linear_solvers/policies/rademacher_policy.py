@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 import torch
-from linear_operator.operators import BlockSparseLinearOperator, LinearOperator
+from linear_operator.operators import BlockDiagonalSparseLinearOperator, LinearOperator
 
 from ._sparsify_vector import sparsify_vector
 
@@ -61,8 +61,8 @@ class RademacherPolicy(LinearSolverPolicy):
             if self.num_nonzero is None and self.non_zero_idcs is None:
                 return rademacher_vec
             else:
-                action = BlockSparseLinearOperator(
-                    non_zero_idcs=non_zero_idcs, blocks=rademacher_vec, size_sparse_dim=solver_state.problem.A.shape[0]
+                action = BlockDiagonalSparseLinearOperator(
+                    non_zero_idcs=non_zero_idcs, blocks=rademacher_vec, size_input_dim=solver_state.problem.A.shape[0]
                 )
 
         return action
