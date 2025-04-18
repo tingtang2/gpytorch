@@ -113,28 +113,26 @@ class ComputationAwareGP(ExactGP):
                 lengthscale = self.covar_module.lengthscale
                 kernel_forward_fn = self.covar_module._forward_no_kernel_linop
 
-            if self.cholfac_gram_SKhatS is None:
-                # If the Cholesky factor of the gram matrix S'(K + noise)S hasn't been precomputed
-                # (in the loss function), compute it.
-                K_lazy = kernel_forward_fn(
-                    self.train_inputs[0].div(lengthscale).view(
-                        self.projection_dim, self.num_non_zero,
-                        self.train_inputs[0].shape[-1]),
-                    self.train_inputs[0].div(lengthscale).view(
-                        self.projection_dim, 1, self.num_non_zero,
-                        self.train_inputs[0].shape[-1]),
-                )
-                gram_SKS = (((K_lazy @ self.actions_op.blocks.view(
-                    self.projection_dim, 1, self.num_non_zero, 1)).squeeze(-1)
-                             *
-                             self.actions_op.blocks).sum(-1).mul(outputscale))
+            # If the Cholesky factor of the gram matrix S'(K + noise)S hasn't been precomputed
+            # (in the loss function), compute it.
+            K_lazy = kernel_forward_fn(
+                self.train_inputs[0].div(lengthscale).view(
+                    self.projection_dim, self.num_non_zero,
+                    self.train_inputs[0].shape[-1]),
+                self.train_inputs[0].div(lengthscale).view(
+                    self.projection_dim, 1, self.num_non_zero,
+                    self.train_inputs[0].shape[-1]),
+            )
+            gram_SKS = (((K_lazy @ self.actions_op.blocks.view(
+                self.projection_dim, 1, self.num_non_zero, 1)).squeeze(-1) *
+                         self.actions_op.blocks).sum(-1).mul(outputscale))
 
-                StrS_diag = (self.actions_op.blocks**2).sum(
-                    -1)  # NOTE: Assumes orthogonal actions.
-                gram_SKhatS = gram_SKS + torch.diag(
-                    self.likelihood.noise * StrS_diag)
-                self.cholfac_gram_SKhatS = linop_utils.cholesky.psd_safe_cholesky(
-                    gram_SKhatS.to(dtype=torch.float64), upper=False)
+            StrS_diag = (self.actions_op.blocks**2).sum(
+                -1)  # NOTE: Assumes orthogonal actions.
+            gram_SKhatS = gram_SKS + torch.diag(
+                self.likelihood.noise * StrS_diag)
+            self.cholfac_gram_SKhatS = linop_utils.cholesky.psd_safe_cholesky(
+                gram_SKhatS.to(dtype=torch.float64), upper=False)
 
             # Cross-covariance mapped to the low-dimensional space spanned by the actions: k(x, X)S
             covar_x_train_actions = ((kernel_forward_fn(
