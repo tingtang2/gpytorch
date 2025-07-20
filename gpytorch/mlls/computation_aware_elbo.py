@@ -135,4 +135,4 @@ class ComputationAwareELBO(MarginalLogLikelihood):
 
         elbo = torch.squeeze(expected_log_likelihood_term -
                              self.beta * kl_prior_term.to(dtype=targets.dtype))
-        return elbo
+        return elbo, expected_log_likelihood_term, kl_prior_term
