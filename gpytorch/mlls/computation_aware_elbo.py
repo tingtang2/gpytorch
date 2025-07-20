@@ -128,7 +128,7 @@ class ComputationAwareELBO(MarginalLogLikelihood):
             2 * torch.sum(torch.log(cholfac_gram_SKhatS.diagonal())) -
             self.model.projection_dim *
             torch.log(self.likelihood.noise).to(dtype=torch.float64) -
-            torch.log(StrS_diag.to(dtype=torch.float64).sum()) - torch.trace(
+            torch.log(StrS_diag.to(dtype=torch.float64)).sum() - torch.trace(
                 torch.cholesky_solve(gram_SKS.to(dtype=torch.float64),
                                      cholfac_gram_SKhatS,
                                      upper=False))).div(num_train_data)
