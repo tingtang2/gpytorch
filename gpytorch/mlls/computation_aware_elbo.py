@@ -18,12 +18,14 @@ class ComputationAwareELBO(MarginalLogLikelihood):
     def __init__(self,
                  likelihood: GaussianLikelihood,
                  model: "gpytorch.models.ComputationAwareGP",
-                 beta: float = 1.0):
+                 beta: float = 1.0,
+                 return_elbo_terms: bool = False):
         if not isinstance(likelihood, _GaussianLikelihoodBase):
             raise NotImplementedError(
                 "Likelihood must be Gaussian for computation-aware inference.")
         super().__init__(likelihood, model)
         self.beta = beta
+        self.return_elbo_terms = return_elbo_terms
 
     def forward(self, outputs: torch.Tensor, targets: torch.Tensor, **kwargs):
 
@@ -135,4 +137,7 @@ class ComputationAwareELBO(MarginalLogLikelihood):
 
         elbo = torch.squeeze(expected_log_likelihood_term -
                              self.beta * kl_prior_term.to(dtype=targets.dtype))
-        return elbo, expected_log_likelihood_term, kl_prior_term
+        if self.return_elbo_terms:
+            return elbo, expected_log_likelihood_term, kl_prior_term
+        else:
+            return elbo
