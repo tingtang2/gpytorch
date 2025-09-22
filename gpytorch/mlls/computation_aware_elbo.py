@@ -61,7 +61,7 @@ class ComputationAwareELBO(MarginalLogLikelihood):
 
         # Explicitly free up memory from prediction to avoid unnecessary memory overhead
         # TODO: does this really do much, since we detach it from the graph anyway?
-        del self.model.cholfac_gram_SKhatS
+        # del self.model.cholfac_gram_SKhatS
 
         # Lazily evaluate kernel at training inputs as a 4D tensor with shape (PROJ_DIM, PROJ_DIM, NNZ, NNZ)
         K_lazy = kernel_forward_fn(
