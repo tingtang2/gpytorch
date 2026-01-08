@@ -143,8 +143,8 @@ class ComputationAwareGP(ExactGP):
 
         super().__init__(
             # Training data is subset to satisfy the requirement: num_non_zero * projection_dim = num_train_targets
-            train_inputs[0:num_non_zero * projection_dim],
-            train_targets[0:num_non_zero * projection_dim],
+            train_inputs[-num_non_zero * projection_dim:],
+            train_targets[-num_non_zero * projection_dim:],
             likelihood,
         )
         self.mean_module = mean_module
