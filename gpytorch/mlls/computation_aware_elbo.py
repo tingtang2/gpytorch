@@ -27,7 +27,22 @@ class ComputationAwareELBO(MarginalLogLikelihood):
         self.beta = beta
         self.return_elbo_terms = return_elbo_terms
 
-    def forward(self, outputs: torch.Tensor, targets: torch.Tensor, **kwargs):
+    def _add_other_terms(self, res, params):
+        # Add additional terms (SGPR / learned inducing points, heteroskedastic likelihood models)
+        for added_loss_term in self.model.added_loss_terms():
+            res = res.add(added_loss_term.loss(*params))
+
+        # Add log probs of priors on the (functions of) parameters
+        res_ndim = res.ndim
+        for name, module, prior, closure, _ in self.model.named_priors():
+            prior_term = prior.log_prob(closure(module))
+            res.add_(
+                prior_term.view(*prior_term.shape[:res_ndim], -1).sum(dim=-1))
+
+        return res
+
+    def forward(self, outputs: torch.Tensor, targets: torch.Tensor, *params,
+                **kwargs):
 
         # Initialize some useful variables
         train_inputs = self.model.train_inputs[0]
@@ -119,6 +134,9 @@ class ComputationAwareELBO(MarginalLogLikelihood):
 
         elbo = torch.squeeze(expected_log_likelihood_term -
                              self.beta * kl_prior_term.to(dtype=targets.dtype))
+
+        elbo = self._add_other_terms(elbo, params)
+
         if self.return_elbo_terms:
             return elbo, expected_log_likelihood_term, kl_prior_term
         else:
