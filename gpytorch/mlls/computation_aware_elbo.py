@@ -114,8 +114,8 @@ class ComputationAwareELBO(MarginalLogLikelihood):
             num_train_data * torch.log(self.likelihood.noise) +
             1 / self.likelihood.noise *
             (torch.linalg.vector_norm(train_targets - f_pred_mean_batch)**2 +
-             f_pred_var_batch) + num_train_data *
-            torch.log(torch.as_tensor(2 * math.pi))).div(num_train_data)
+             f_pred_var_batch) +
+            num_train_data * torch.log(torch.as_tensor(2 * math.pi)))
 
         # KL divergence to prior
         kl_prior_term = 0.5 * (
@@ -130,7 +130,7 @@ class ComputationAwareELBO(MarginalLogLikelihood):
             - torch.trace(
                 torch.cholesky_solve(gram_SKS.to(dtype=torch.float64),
                                      cholfac_gram_SKhatS,
-                                     upper=False))).div(num_train_data)
+                                     upper=False)))
 
         elbo = torch.squeeze(expected_log_likelihood_term -
                              self.beta * kl_prior_term.to(dtype=targets.dtype))
@@ -138,6 +138,7 @@ class ComputationAwareELBO(MarginalLogLikelihood):
         elbo = self._add_other_terms(elbo, params)
 
         if self.return_elbo_terms:
-            return elbo, expected_log_likelihood_term, kl_prior_term
+            return elbo.div(num_train_data), expected_log_likelihood_term.div(
+                num_train_data), kl_prior_term.div(num_train_data)
         else:
-            return elbo
+            return elbo.div(num_train_data)
