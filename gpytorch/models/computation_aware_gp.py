@@ -103,6 +103,8 @@ class ComputationAwareGP(ExactGP):
     :param likelihood: Likelihood.
     :param projection_dim: Dimension of the lower-dimensional space which the data is projected onto.
     :param initialization: Initialization of the action entries. Default is 'random'.
+    :param use_first_training_subset: If True, use the first ``num_non_zero * projection_dim``
+        training data points. If False, use the last ones. Default is False.
 
     Example:
         >>> from gpytorch import models, means, kernels, likelihoods, distributions
@@ -136,15 +138,20 @@ class ComputationAwareGP(ExactGP):
         likelihood: "likelihoods.GaussianLikelihood",
         projection_dim: int,
         initialization: str = "random",
+        use_first_training_subset: bool = False,
     ):
 
         # Set number of non-zero action entries such that num_non_zero * projection_dim = num_train_targets
         num_non_zero = train_targets.size(-1) // projection_dim
+        num_train_subset = num_non_zero * projection_dim
+        train_data_slice = slice(0, num_train_subset) if use_first_training_subset else slice(-num_train_subset, None)
+        train_inputs = train_inputs[train_data_slice]
+        train_targets = train_targets[train_data_slice]
 
         super().__init__(
             # Training data is subset to satisfy the requirement: num_non_zero * projection_dim = num_train_targets
-            train_inputs[-num_non_zero * projection_dim:],
-            train_targets[-num_non_zero * projection_dim:],
+            train_inputs,
+            train_targets,
             likelihood,
         )
         self.mean_module = mean_module
